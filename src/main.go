@@ -81,6 +81,11 @@ var (
 	threads uint
 
 	upbin bool
+
+	postNonce     uint
+	postPow       uint64
+	indicesString string
+	verifyProof   bool
 )
 
 func parseFlags() {
@@ -113,6 +118,12 @@ func parseFlags() {
 	var to int
 	flag.IntVar(&to, "toFile", math.MaxInt, "index of the last file to init (inclusive). Will init to the end of declared space if not provided.")
 	flag.BoolVar(&upbin, "upbin", false, "overwrite post.bin, default false, be carefully set.")
+
+	flag.UintVar(&postNonce, "postNonce", 0, "post proof nonce")
+	flag.Uint64Var(&postPow, "postPow", 0, "post proof pow")
+	flag.StringVar(&indicesString, "postIndices", "", "post proof indices")
+	flag.BoolVar(&verifyProof, "verifyProof", false, "verify proof, must provide -postNone -postPow -postIndices")
+
 	flag.Parse()
 
 	// A workaround to simulate an optional value w/o a default ¯\_(ツ)_/¯
@@ -243,6 +254,34 @@ func main() {
 	logger, err := zapCfg.Build()
 	if err != nil {
 		log.Fatalln("failed to initialize zap logger:", err)
+	}
+
+	if verifyProof {
+		proofMetadata := &shared.ProofMetadata{
+			NodeId:          id,
+			CommitmentAtxId: commitmentAtxId,
+			Challenge:       shared.ZeroChallenge,
+			LabelsPerUnit:   cfg.LabelsPerUnit,
+			NumUnits:        opts.NumUnits,
+		}
+
+		indices, err := hex.DecodeString(indicesString)
+		if err != nil {
+			fmt.Printf("invalid commitmentAtxId: %v", err)
+		}
+		post := &shared.Proof{Nonce: uint32(postNonce), Indices: indices, Pow: postPow}
+
+		verifier, err := verifying.NewProofVerifier()
+		if err != nil {
+			log.Fatalln("failed to create verifier", err)
+		}
+		defer verifier.Close()
+		if err := verifier.Verify(post, proofMetadata, cfg, logger); err != nil {
+			log.Fatalln("failed to verify test proof", err)
+		}
+
+		log.Println("cli: proof is valid")
+		os.Exit(0)
 	}
 
 	if verifyPos {
